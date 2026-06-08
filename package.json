@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "Unified command builder and runner for Codex, Claude Code, Gemini, and Copilot CLI",
   "main": "src/index.js",
+  "types": "src/index.d.ts",
   "type": "commonjs",
   "files": [
     "src",

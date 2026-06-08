@@ -1,5 +1,7 @@
 # agent-cli-unified
 
+[中文文档](README_ZH.md)
+
 A reusable Node.js package that standardizes command construction, execution, and stream event parsing for:
 - Codex CLI
 - Claude Code CLI
