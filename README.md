@@ -52,10 +52,18 @@ Build a deterministic command invocation.
 - `agent`: `codex | claude | gemini | copilot` (aliases supported)
 - `prompt`: required string
 - `cwd`: optional; defaults to user home
+- `systemPrompt`: optional; injected when CLI supports it, otherwise folded into prompt
+- `model`: optional; mapped to `--model` for supported CLIs
 - `commandPath`: optional explicit executable path
 - `argsOverride`: optional full args override
 - `extraArgs`: optional additional args appended to built args
 - `env`: optional extra env vars
+- `cliOptions`: optional advanced flags toggle
+  - `bypassConfirmations` (default `true`)
+  - `disableUpdateCheck` (default `true`, codex)
+  - `skipGitRepoCheck` (default `true`, codex)
+  - `includeHookEvents` (default `true`, claude)
+  - `geminiPromptStyle` (`flag` default, or `positional`)
 
 ### `runCliAgent(options)`
 

@@ -10,57 +10,37 @@ const AGENT_DEFINITIONS = Object.freeze({
     id: 'claude',
     aliases: ['claude-code', 'claude-agent'],
     binary: 'claude',
-    label: 'Claude Code CLI',
+    label: 'Claude Code',
+    subLabel: 'Anthropic CLI Agent',
+    type: 'local',
     versionFlag: '--version',
-    buildArgs: ({ prompt }) => [
-      '-p', prompt,
-      '--print',
-      '--output-format=stream-json',
-      '--include-hook-events',
-      '--dangerously-skip-permissions',
-      '--verbose',
-    ],
   },
   codex: {
     id: 'codex',
     aliases: ['codex-agent'],
     binary: 'codex',
     label: 'Codex CLI',
+    subLabel: 'OpenAI CLI Agent',
+    type: 'local',
     versionFlag: '-c check_for_update_on_startup=false --version',
-    buildArgs: ({ prompt, cwd }) => [
-      'exec',
-      '--json',
-      '--dangerously-bypass-approvals-and-sandbox',
-      '-c', 'check_for_update_on_startup=false',
-      '-C', cwd,
-      prompt,
-    ],
   },
   gemini: {
     id: 'gemini',
     aliases: ['gemini-agent'],
     binary: 'gemini',
     label: 'Gemini CLI',
+    subLabel: 'Google CLI Agent',
+    type: 'local',
     versionFlag: '--version',
-    buildArgs: ({ prompt }) => [
-      '--output-format', 'stream-json',
-      '--yolo',
-      '--skip-trust',
-      prompt,
-    ],
   },
   copilot: {
     id: 'copilot',
     aliases: ['copilot-agent', 'copilot-cli'],
     binary: 'copilot',
     label: 'Copilot CLI',
+    subLabel: 'GitHub CLI Agent',
+    type: 'local',
     versionFlag: '--version',
-    buildArgs: ({ prompt }) => [
-      '--output-format', 'json',
-      '--stream', 'on',
-      '-p', prompt,
-      '--yolo',
-    ],
   },
 });
 
@@ -79,8 +59,27 @@ function normalizeAgent(agent) {
 }
 
 function resolveCwd(cwd) {
-  if (typeof cwd === 'string' && cwd.trim()) return cwd.trim();
+  if (typeof cwd === 'string' && cwd.trim()) {
+    const trimmed = cwd.trim();
+    if (trimmed.startsWith('~')) {
+      return path.join(os.homedir(), trimmed.slice(1));
+    }
+    return path.resolve(trimmed);
+  }
   return os.homedir();
+}
+
+function buildCliPath() {
+  const existing = process.env.PATH || '';
+  const home = os.homedir();
+  const extras = [
+    '/opt/homebrew/bin',
+    '/usr/local/bin',
+    '/usr/bin',
+    '/bin',
+    home ? `${home}/.local/bin` : '',
+  ].filter(Boolean);
+  return [...new Set([...existing.split(':'), ...extras].filter(Boolean))].join(':');
 }
 
 function findExecutable(binary) {
@@ -125,14 +124,88 @@ function getExecutableVersion(execPath, versionFlag = '--version') {
 function defaultEnv(extra = {}) {
   return {
     ...process.env,
+    PATH: buildCliPath(),
     FORCE_COLOR: '0',
     NO_COLOR: '1',
     TERM: 'dumb',
     CI: '1',
+    COLUMNS: '10000',
+    LINES: '10000',
+    NODE_TLS_REJECT_UNAUTHORIZED: '0',
     GEMINI_CLI_TRUST_WORKSPACE: 'true',
     DISABLE_AUTOUPDATER: '1',
     ...extra,
   };
+}
+
+function buildAgentArgs(agentId, payload) {
+  const {
+    prompt,
+    cwd,
+    systemPrompt,
+    model,
+    cliOptions = {},
+  } = payload;
+
+  const opts = {
+    bypassConfirmations: cliOptions.bypassConfirmations !== false,
+    disableUpdateCheck: cliOptions.disableUpdateCheck !== false,
+    skipGitRepoCheck: cliOptions.skipGitRepoCheck !== false,
+    includeHookEvents: cliOptions.includeHookEvents !== false,
+    verbose: cliOptions.verbose !== false,
+    print: cliOptions.print !== false,
+    geminiPromptStyle: cliOptions.geminiPromptStyle || 'flag',
+    ...cliOptions,
+  };
+
+  if (agentId === 'claude') {
+    const args = ['-p', prompt];
+    if (opts.print) args.push('--print');
+    args.push(`--output-format=${opts.claudeOutputFormat || 'stream-json'}`);
+    if (opts.includeHookEvents) args.push('--include-hook-events');
+    if (opts.bypassConfirmations) args.push('--dangerously-skip-permissions');
+    if (opts.verbose) args.push('--verbose');
+    if (systemPrompt) args.push('--system-prompt', systemPrompt);
+    if (model) args.push('--model', model);
+    return args;
+  }
+
+  if (agentId === 'codex') {
+    const effectivePrompt = systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt;
+    const args = ['exec', '--json'];
+    if (opts.skipGitRepoCheck) args.push('--skip-git-repo-check');
+    if (opts.bypassConfirmations) args.push('--dangerously-bypass-approvals-and-sandbox');
+    if (opts.disableUpdateCheck) args.push('-c', 'check_for_update_on_startup=false');
+    args.push('-C', cwd);
+    if (model) args.push('--model', model);
+    args.push(effectivePrompt);
+    return args;
+  }
+
+  if (agentId === 'gemini') {
+    const effectivePrompt = systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt;
+    const args = ['--output-format', opts.geminiOutputFormat || 'stream-json'];
+    if (opts.bypassConfirmations) args.push('--yolo');
+    if (opts.skipTrust !== false) args.push('--skip-trust');
+    if (model) args.push('--model', model);
+    if (opts.geminiPromptStyle === 'positional') args.push(effectivePrompt);
+    else args.push('-p', effectivePrompt);
+    return args;
+  }
+
+  if (agentId === 'copilot') {
+    const effectivePrompt = systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt;
+    const args = [
+      '--output-format', opts.copilotOutputFormat || 'json',
+      '--stream', opts.copilotStreamMode || 'on',
+    ];
+    if (opts.bypassConfirmations) args.push('--yolo');
+    if (model) args.push('--model', model);
+    args.push('-p', effectivePrompt);
+    return args;
+  }
+
+  return [prompt];
 }
 
 function detectCliAgents(options = {}) {
@@ -145,6 +218,8 @@ function detectCliAgents(options = {}) {
       return {
         id: agent.id,
         label: agent.label,
+        subLabel: agent.subLabel,
+        type: agent.type,
         binary: agent.binary,
         available: false,
         executablePath: null,
@@ -154,6 +229,8 @@ function detectCliAgents(options = {}) {
     return {
       id: agent.id,
       label: agent.label,
+      subLabel: agent.subLabel,
+      type: agent.type,
       binary: agent.binary,
       available: true,
       executablePath,
@@ -162,8 +239,71 @@ function detectCliAgents(options = {}) {
   });
 }
 
+function explicitlyRequestsExternalAccess(userContent, workspacePath) {
+  if (!workspacePath) return false;
+  
+  // Find all absolute paths in userContent
+  const absPathRegex = /(?:\s|^)(\/[a-zA-Z0-9_\.\-]+(?:\/[a-zA-Z0-9_\.\-]+)*)/g;
+  let match;
+  while ((match = absPathRegex.exec(userContent)) !== null) {
+    const matchedPath = match[1];
+    const relative = path.relative(workspacePath, matchedPath);
+    const isInside = !relative.startsWith('..') && !path.isAbsolute(relative);
+    if (!isInside) {
+      return true; 
+    }
+  }
+  
+  const keywords = [
+    'other directory', 'external directory', 'outside of', 'cross-directory', 
+    'system directory', 'home directory', 'slash', 'root folder',
+    '其它目录', '外部目录', '工作区之外', '跨目录', '系统目录', '家目录', '根目录'
+  ];
+  const lowercaseContent = userContent.toLowerCase();
+  return keywords.some(kw => lowercaseContent.includes(kw));
+}
+
+function isAttemptingUnauthorizedAccess(toolName, input, workspacePath) {
+  if (!toolName || !input) return false;
+  
+  // 1. Validate file path parameters
+  const filePathKeys = ['file_path', 'path', 'filepath', 'file', 'target', 'dest', 'source', 'src'];
+  for (const key of filePathKeys) {
+    const val = input[key];
+    if (typeof val === 'string' && val.trim()) {
+      const resolved = path.isAbsolute(val) ? path.resolve(val) : path.resolve(workspacePath, val);
+      const relative = path.relative(workspacePath, resolved);
+      const isInside = !relative.startsWith('..') && !path.isAbsolute(relative);
+      if (!isInside && resolved !== workspacePath) {
+        return true; 
+      }
+    }
+  }
+  
+  // 2. Validate bash/command execution parameters
+  const cmdKeys = ['command', 'cmd', 'script', 'args'];
+  for (const key of cmdKeys) {
+    const val = input[key];
+    const checkStr = Array.isArray(val) ? val.join(' ') : (typeof val === 'string' ? val : '');
+    if (checkStr.trim()) {
+      const absPathRegex = /(?:\s|^)(\/[a-zA-Z0-9_\.\-]+(?:\/[a-zA-Z0-9_\.\-]+)*)/g;
+      let match;
+      while ((match = absPathRegex.exec(checkStr)) !== null) {
+        const matchedPath = match[1];
+        const relative = path.relative(workspacePath, matchedPath);
+        const isInside = !relative.startsWith('..') && !path.isAbsolute(relative);
+        if (!isInside && matchedPath !== workspacePath) {
+          return true; 
+        }
+      }
+    }
+  }
+  
+  return false;
+}
+
 function buildCliInvocation(options = {}) {
-  const prompt = String(options.prompt || '').trim();
+  let prompt = String(options.prompt || '').trim();
   if (!prompt) {
     throw new Error('prompt is required');
   }
@@ -171,6 +311,21 @@ function buildCliInvocation(options = {}) {
   const agentId = normalizeAgent(options.agent);
   const agent = AGENT_DEFINITIONS[agentId];
   const cwd = resolveCwd(options.cwd);
+
+  const sandbox = options.sandbox || {};
+  if (sandbox.restrictToWorkspace) {
+    const workspacePath = path.resolve(cwd);
+    if (!prompt.includes('[SECURITY POLICY - WORKSPACE LOCK]')) {
+      prompt = `${prompt}\n\n` +
+        `[SECURITY POLICY - WORKSPACE LOCK]\n` +
+        `- You are strictly restricted to operate ONLY within the active workspace directory: "${workspacePath}".\n` +
+        `- Do NOT read, write, create, or execute any commands in directories outside of "${workspacePath}".\n` +
+        `- All file operations (read, write, list) and shell commands must be relative to or inside "${workspacePath}".\n` +
+        `- Unless explicitly requested in your prompt to access a specific external path, you must not access any default home sandbox (~/.codex or ~/.cortex) or system directories.\n` +
+        `- If you need to write temporary files, create a temporary folder INSIDE "${workspacePath}".\n` +
+        `- If you cannot fulfill the request within "${workspacePath}", explain this limitation to the user.`;
+    }
+  }
 
   const commandPath =
     (typeof options.commandPath === 'string' && options.commandPath.trim()) ||
@@ -180,9 +335,54 @@ function buildCliInvocation(options = {}) {
     throw new Error(`Executable not found for ${agent.label} (${agent.binary})`);
   }
 
-  const args = Array.isArray(options.argsOverride)
-    ? [...options.argsOverride]
-    : agent.buildArgs({ prompt, cwd });
+  let args;
+  const systemPrompt = options.systemPrompt || '';
+
+  if (Array.isArray(options.argsTemplate)) {
+    const hasSystemPlaceholder = options.argsTemplate.some((a) => a.includes('{{SYSTEM}}'));
+    const hasPromptPlaceholder = options.argsTemplate.some((a) => a.includes('{{PROMPT}}'));
+    
+    const effectivePrompt = hasSystemPlaceholder || !systemPrompt
+      ? prompt
+      : `${systemPrompt}\n\n${prompt}`;
+      
+    args = options.argsTemplate.map((a) =>
+      a.replace('{{SYSTEM}}', systemPrompt)
+       .replace('{{PROMPT}}', effectivePrompt)
+       .replace('{{MODEL}}', options.model || '')
+    );
+    
+    if (!hasPromptPlaceholder) {
+      if (agentId === 'claude') {
+        if (options.model) args.push('--model', options.model);
+        args.push('-p', prompt, '--output-format', 'stream-json', '--verbose', '--dangerously-skip-permissions');
+        if (systemPrompt) args.push('--system-prompt', systemPrompt);
+      } else if (agentId === 'gemini') {
+        if (options.model) args.push('--model', options.model);
+        args.push('--skip-trust', '-p', effectivePrompt, '--output-format', 'stream-json', '--yolo');
+      } else if (agentId === 'copilot') {
+        if (options.model) args.push('--model', options.model);
+        args.push('-p', effectivePrompt, '--yolo');
+      } else if (agentId === 'codex') {
+        args.push('-C', cwd);
+        args.push('exec', '--json', '--skip-git-repo-check', '--dangerously-bypass-approvals-and-sandbox');
+        if (options.model) args.push('--model', options.model);
+        args.push(effectivePrompt);
+      } else {
+        args.push(effectivePrompt);
+      }
+    }
+  } else if (Array.isArray(options.argsOverride)) {
+    args = [...options.argsOverride];
+  } else {
+    args = buildAgentArgs(agent.id, {
+      prompt,
+      cwd,
+      systemPrompt: options.systemPrompt,
+      model: options.model,
+      cliOptions: options.cliOptions,
+    });
+  }
 
   if (Array.isArray(options.extraArgs) && options.extraArgs.length) {
     args.push(...options.extraArgs);
@@ -196,6 +396,7 @@ function buildCliInvocation(options = {}) {
     args,
     cwd,
     env: defaultEnv(options.env),
+    prompt,
   };
 }
 
@@ -229,40 +430,130 @@ function parseAgentEvent(line) {
 
   try {
     const json = JSON.parse(trimmed);
+    const eventType = typeof json.type === 'string' ? json.type : '';
 
-    if (typeof json.type === 'string' && (json.type === 'content' || json.type === 'text')) {
+    // 1. Claude Code CLI nested events
+    if (eventType === 'assistant' && json.message && Array.isArray(json.message.content)) {
+      const out = [];
+      for (const block of json.message.content) {
+        if (block.type === 'text' && block.text) {
+          out.push({ type: 'text', text: block.text });
+        } else if (block.type === 'thinking' && block.thinking) {
+          out.push({ type: 'thinking', text: block.thinking });
+        } else if (block.type === 'tool_use') {
+          out.push({
+            type: 'tool_use',
+            name: block.name || '',
+            input: block.input || {},
+            toolUseId: block.id || '',
+          });
+        }
+      }
+      return out.length > 0 ? out : null;
+    }
+
+    if (eventType === 'user' && json.message && Array.isArray(json.message.content)) {
+      const out = [];
+      for (const block of json.message.content) {
+        if (block.type === 'tool_result') {
+          out.push({
+            type: 'tool_result',
+            content: block.content || '',
+            toolUseId: block.id || '',
+            isError: !!block.is_error,
+          });
+        }
+      }
+      return out.length > 0 ? out : null;
+    }
+
+    // 2. Codex item started/completed events
+    if ((eventType === 'item.started' || eventType === 'item.completed') && json.item && typeof json.item === 'object') {
+      const item = json.item;
+      const itemType = String(item.type || '');
+      const itemId = String(item.id || '');
+
+      if (eventType === 'item.started') {
+        const input = {};
+        if (typeof item.command === 'string') {
+          const cmd = item.command.trim().replace(/^\/bin\/(?:zsh|bash|sh)\s+-lc\s+/, '').replace(/^['"]|['"]$/g, '');
+          input.command = cmd;
+        }
+        if (item.status != null) input.status = item.status;
+        
+        return {
+          type: 'tool_use',
+          name: itemType || 'codex_item',
+          input,
+          toolUseId: itemId || undefined,
+        };
+      } else { // item.completed
+        const status = String(item.status || '');
+        const exitCode = item.exit_code;
+        const text =
+          (typeof item.aggregated_output === 'string' && item.aggregated_output) ||
+          (typeof item.output === 'string' && item.output) ||
+          (typeof item.text === 'string' && item.text) ||
+          JSON.stringify(item, null, 2);
+
+        return {
+          type: 'tool_result',
+          content: text,
+          toolUseId: itemId || undefined,
+          isError: (typeof exitCode === 'number' && exitCode !== 0) || (status === 'failed'),
+        };
+      }
+    }
+
+    // 3. Gemini / standard stream JSON events
+    if (eventType === 'content' || eventType === 'text') {
       return { type: 'text', text: json.text || json.value || json.content || '' };
     }
 
-    if (json.type === 'assistant.message_delta') {
+    if (eventType === 'assistant.message_delta') {
       return { type: 'text', text: json?.data?.deltaContent || '' };
     }
 
-    if (json.type === 'assistant.message') {
+    if (eventType === 'assistant.message') {
       return { type: 'text', text: json?.data?.content || '' };
     }
 
-    if (json.type === 'tool_call' || json.type === 'tool_use' || json.type === 'functionCall') {
+    if (eventType === 'tool_use' || eventType === 'tool_call' || eventType === 'functionCall') {
       return {
-        type: 'tool_call',
+        type: 'tool_use',
         name: json.name || json.tool_name || json?.functionCall?.name || '',
         input: json.input || json.args || json.parameters || json?.functionCall?.args || {},
+        toolUseId: json.tool_id || json.id || json?.functionCall?.id || '',
       };
     }
 
-    if (json.type === 'tool_result' || json.type === 'tool' || json.type === 'functionResponse') {
+    if (eventType === 'tool_result' || eventType === 'tool' || eventType === 'functionResponse') {
+      const content = json.output || json.content || json.value || json?.functionResponse?.response || '';
       return {
         type: 'tool_result',
-        content: json.output || json.content || json.value || json?.functionResponse?.response || '',
+        content: Array.isArray(content) ? content.map(c => c.text || '').join('') : (typeof content === 'object' ? JSON.stringify(content) : content),
         isError: !!json.is_error || !!json.error || json.status === 'error',
+        toolUseId: json.tool_use_id || json.tool_id || json.id || '',
       };
     }
 
-    if (json.type === 'error') {
+    if (eventType === 'error') {
       return {
         type: 'error',
         text: json.message || json.content || json.value || trimmed,
       };
+    }
+
+    if (eventType === 'system') {
+      if (json.subtype === 'init') {
+        return { type: 'system', text: `⚙️ [Init] Local workspace: ${json.cwd || "default"}\n` };
+      }
+      if (json.subtype === 'hook_started') {
+        return { type: 'system', text: `⏱️ [Hook Start] ${json.hook_name || ""}\n` };
+      }
+      if (json.subtype === 'hook_response') {
+        return { type: 'system', text: `✅ [Hook Done] ${json.hook_name || ""}\n` };
+      }
     }
 
     return { type: 'json', payload: json };
@@ -271,12 +562,98 @@ function parseAgentEvent(line) {
   }
 }
 
+function extensionFromMimeType(mimeType = '') {
+  const normalized = String(mimeType).toLowerCase();
+  if (normalized === 'image/png') return '.png';
+  if (normalized === 'image/jpeg' || normalized === 'image/jpg') return '.jpg';
+  if (normalized === 'image/webp') return '.webp';
+  if (normalized === 'image/gif') return '.gif';
+  if (normalized === 'image/bmp') return '.bmp';
+  if (normalized === 'image/svg+xml') return '.svg';
+  return '.img';
+}
+
+function sanitizeAttachmentName(name = '') {
+  const safe = String(name)
+    .replace(/[^a-zA-Z0-9._-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60);
+  return safe || 'clipboard-image';
+}
+
+function materializeImageAttachments(attachments) {
+  if (!Array.isArray(attachments) || attachments.length === 0) {
+    return { dirPath: null, files: [] };
+  }
+
+  const sessionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-cli-attachments-'));
+  const files = [];
+
+  for (let i = 0; i < attachments.length; i++) {
+    const att = attachments[i] || {};
+    const base64Data = typeof att.base64Data === 'string' ? att.base64Data.trim() : '';
+    if (!base64Data) continue;
+
+    try {
+      const ext = extensionFromMimeType(att.mimeType || '');
+      const safeName = sanitizeAttachmentName(att.name || `clipboard-image-${i + 1}`);
+      const filePath = path.join(sessionDir, `${safeName}-${Date.now()}-${i + 1}${ext}`);
+      fs.writeFileSync(filePath, Buffer.from(base64Data, 'base64'));
+      files.push({
+        filePath,
+        mimeType: att.mimeType || 'image/*',
+        name: att.name || `clipboard-image-${i + 1}`
+      });
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  if (files.length === 0) {
+    try {
+      fs.rmSync(sessionDir, { recursive: true, force: true });
+    } catch (e) {}
+    return { dirPath: null, files: [] };
+  }
+
+  return { dirPath: sessionDir, files };
+}
+
+function buildPromptWithImageFiles(prompt, files) {
+  if (!Array.isArray(files) || files.length === 0) return prompt;
+
+  const lines = files.map((f, idx) => `${idx + 1}. ${f.filePath} (${f.mimeType})`);
+  return `${prompt}
+
+[Attached Clipboard Images]
+The user attached ${files.length} image(s). The bridge has saved them as local files:
+${lines.join('\n')}
+
+Please inspect these image files directly and include them in your answer.`;
+}
+
 function runCliAgent(options = {}) {
-  const invocation = buildCliInvocation(options);
+  let finalOptions = { ...options };
+  let materialized = null;
+
+  if (Array.isArray(options.attachments) && options.attachments.length > 0) {
+    materialized = materializeImageAttachments(options.attachments);
+    if (materialized.files.length > 0) {
+      finalOptions.prompt = buildPromptWithImageFiles(options.prompt, materialized.files);
+    }
+  }
+
+  const invocation = buildCliInvocation(finalOptions);
+
+  const sandbox = options.sandbox || {};
+  const restrictToWorkspace = !!sandbox.restrictToWorkspace;
+  const workspacePath = restrictToWorkspace ? path.resolve(invocation.cwd) : null;
 
   return new Promise((resolve, reject) => {
     const timeoutMs = Number(options.timeoutMs || 0);
     let timedOut = false;
+    let childError = null;
 
     const child = spawn(invocation.command, invocation.args, {
       cwd: invocation.cwd,
@@ -306,35 +683,79 @@ function runCliAgent(options = {}) {
       }, timeoutMs);
     }
 
+    const cleanUpTemp = () => {
+      if (materialized && materialized.dirPath) {
+        try {
+          fs.rmSync(materialized.dirPath, { recursive: true, force: true });
+        } catch (e) {
+          // ignore
+        }
+      }
+    };
+
+    const handleLine = (line) => {
+      const parsed = parseAgentEvent(line);
+      if (parsed) {
+        const parsedEvents = Array.isArray(parsed) ? parsed : [parsed];
+        for (const event of parsedEvents) {
+          if (event.type === 'tool_use' && restrictToWorkspace && workspacePath) {
+            if (!explicitlyRequestsExternalAccess(finalOptions.prompt || '', workspacePath)) {
+              if (isAttemptingUnauthorizedAccess(event.name, event.input, workspacePath)) {
+                child.kill('SIGKILL');
+                timedOut = false;
+                const securityErr = new Error(`[SECURITY VIOLATION] Agent attempted to access unauthorized path outside the workspace: ${JSON.stringify(event.input)}. Process killed.`);
+                securityErr.code = 'SECURITY_VIOLATION';
+                childError = securityErr;
+                return;
+              }
+            }
+          }
+          events.push(event);
+          if (onEvent) onEvent(event);
+        }
+      }
+    };
+
     const stdoutBuffer = new LineBuffer((line) => {
       stdoutLines.push(line);
       if (onStdout) onStdout(line);
-      const event = parseAgentEvent(line);
-      if (event) {
-        events.push(event);
-        if (onEvent) onEvent(event);
-      }
+      handleLine(line);
     });
 
     const stderrBuffer = new LineBuffer((line) => {
       stderrLines.push(line);
       if (onStderr) onStderr(line);
-      const event = parseAgentEvent(line);
-      if (event && event.type === 'error') {
-        events.push(event);
-        if (onEvent) onEvent(event);
+      const parsed = parseAgentEvent(line);
+      if (parsed) {
+        const parsedEvents = Array.isArray(parsed) ? parsed : [parsed];
+        for (const event of parsedEvents) {
+          if (event.type === 'error') {
+            events.push(event);
+            if (onEvent) onEvent(event);
+          }
+        }
       }
     });
 
     child.stdout && child.stdout.on('data', (chunk) => stdoutBuffer.append(chunk.toString()));
     child.stderr && child.stderr.on('data', (chunk) => stderrBuffer.append(chunk.toString()));
 
-    child.on('error', (error) => reject(error));
+    child.on('error', (error) => {
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+      cleanUpTemp();
+      reject(error);
+    });
 
     child.on('close', (code, signal) => {
       if (timeoutHandle) clearTimeout(timeoutHandle);
       stdoutBuffer.flush();
       stderrBuffer.flush();
+      cleanUpTemp();
+
+      if (childError) {
+        reject(childError);
+        return;
+      }
 
       resolve({
         invocation,
@@ -359,6 +780,11 @@ module.exports = {
   getExecutableVersion,
   detectCliAgents,
   buildCliInvocation,
+  buildAgentArgs,
   parseAgentEvent,
   runCliAgent,
+  materializeImageAttachments,
+  buildPromptWithImageFiles,
+  isAttemptingUnauthorizedAccess,
+  explicitlyRequestsExternalAccess,
 };

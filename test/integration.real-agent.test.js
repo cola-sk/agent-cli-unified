@@ -1,5 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const path = require('path');
+const fs = require('fs');
 
 const {
   AGENT_DEFINITIONS,
@@ -83,3 +85,55 @@ for (const agentId of REQUESTED_AGENTS) {
     }
   );
 }
+
+const claudeDetected = detectCliAgents().find((x) => x.id === 'claude');
+const claudeAvailable = claudeDetected && claudeDetected.available;
+
+test(
+  'real e2e: claude should process images and reply',
+  {
+    skip: RUN_REAL && claudeAvailable ? false : 'Set RUN_REAL_AGENT_E2E=1 and install Claude Code to run.',
+    timeout: REAL_TIMEOUT_MS + 5000,
+  },
+  async () => {
+    // 1x1 pixel green PNG Base64
+    const greenPngBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+    
+    const result = await runCliAgent({
+      agent: 'claude',
+      prompt: 'What color is the attached image? Answer with exactly one word: Red, Green, or Blue.',
+      attachments: [
+        {
+          name: 'test-color.png',
+          mimeType: 'image/png',
+          base64Data: greenPngBase64
+        }
+      ],
+      timeoutMs: REAL_TIMEOUT_MS,
+    });
+
+    assert.equal(result.ok, true);
+    assert.match(result.stdout, /green/i, 'Agent should detect that the image is green');
+  }
+);
+
+test(
+  'real e2e: claude should generate structured tool_use events',
+  {
+    skip: RUN_REAL && claudeAvailable ? false : 'Set RUN_REAL_AGENT_E2E=1 and install Claude Code to run.',
+    timeout: REAL_TIMEOUT_MS + 5000,
+  },
+  async () => {
+    const result = await runCliAgent({
+      agent: 'claude',
+      prompt: 'Check if package.json exists in the current directory using your file list or search tool.',
+      cwd: path.resolve(__dirname, '..'),
+      timeoutMs: REAL_TIMEOUT_MS,
+    });
+
+    assert.equal(result.ok, true);
+    const hasToolUse = result.events.some(e => e.type === 'tool_use');
+    assert.ok(hasToolUse, 'Should have logged at least one structured tool_use event');
+  }
+);
+
