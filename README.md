@@ -9,13 +9,13 @@ A reusable Node.js package that standardizes command construction and execution 
 ## Install
 
 ```bash
-npm i @your-github-username/agent-cli-unified
+npm i @sking7/agent-cli-unified
 ```
 
 ## Quick Usage
 
 ```js
-const { buildCliInvocation, runCliAgent, detectCliAgents } = require('@your-github-username/agent-cli-unified');
+const { buildCliInvocation, runCliAgent, detectCliAgents } = require('@sking7/agent-cli-unified');
 
 const available = detectCliAgents();
 console.log(available);
@@ -78,11 +78,30 @@ Detects local binary availability and version for all supported CLIs.
 
 ## Test
 
+Unit tests (no real agent invocation):
+
 ```bash
 npm test
 ```
 
-## Publish To GitHub Packages (npm)
+Real integration tests (actually invoke codex/claude/gemini/copilot CLIs):
+
+```bash
+npm run test:real
+```
+
+Optional environment controls:
+
+- `REAL_AGENT_LIST=codex,claude` to run a subset
+- `REAL_AGENT_TIMEOUT_MS=180000` to increase per-agent timeout
+
+Example:
+
+```bash
+REAL_AGENT_LIST=codex,claude REAL_AGENT_TIMEOUT_MS=180000 npm run test:real
+```
+
+## Publish To npm
 
 ### 1. Update package scope
 

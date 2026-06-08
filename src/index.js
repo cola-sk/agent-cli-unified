@@ -275,6 +275,9 @@ function runCliAgent(options = {}) {
   const invocation = buildCliInvocation(options);
 
   return new Promise((resolve, reject) => {
+    const timeoutMs = Number(options.timeoutMs || 0);
+    let timedOut = false;
+
     const child = spawn(invocation.command, invocation.args, {
       cwd: invocation.cwd,
       env: invocation.env,
@@ -290,6 +293,18 @@ function runCliAgent(options = {}) {
     const onStderr = typeof options.onStderr === 'function' ? options.onStderr : null;
 
     child.stdin && child.stdin.end();
+
+    let timeoutHandle = null;
+    if (timeoutMs > 0) {
+      timeoutHandle = setTimeout(() => {
+        timedOut = true;
+        try {
+          child.kill('SIGKILL');
+        } catch (e) {
+          // ignore
+        }
+      }, timeoutMs);
+    }
 
     const stdoutBuffer = new LineBuffer((line) => {
       stdoutLines.push(line);
@@ -317,6 +332,7 @@ function runCliAgent(options = {}) {
     child.on('error', (error) => reject(error));
 
     child.on('close', (code, signal) => {
+      if (timeoutHandle) clearTimeout(timeoutHandle);
       stdoutBuffer.flush();
       stderrBuffer.flush();
 
@@ -328,6 +344,8 @@ function runCliAgent(options = {}) {
         stdout: stdoutLines.join('\n').trim(),
         stderr: stderrLines.join('\n').trim(),
         events,
+        timedOut,
+        timeoutMs: timeoutMs > 0 ? timeoutMs : null,
       });
     });
   });

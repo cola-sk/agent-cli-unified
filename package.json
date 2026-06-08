@@ -1,5 +1,5 @@
 {
-  "name": "@your-github-username/agent-cli-unified",
+  "name": "@sking7/agent-cli-unified",
   "version": "0.1.0",
   "description": "Unified command builder and runner for Codex, Claude Code, Gemini, and Copilot CLI",
   "main": "src/index.js",
@@ -10,10 +10,13 @@
     "LICENSE"
   ],
   "publishConfig": {
-    "registry": "https://npm.pkg.github.com"
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
   },
   "scripts": {
-    "test": "node --test test/*.test.js",
+    "test": "node --test test/agent-cli.test.js",
+    "test:real": "RUN_REAL_AGENT_E2E=1 node --test test/integration.real-agent.test.js",
+    "test:all": "npm test && npm run test:real",
     "check": "node --check src/index.js",
     "prepublishOnly": "npm run check && npm test"
   },
@@ -29,10 +32,10 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/your-github-username/agent-cli-unified.git"
+    "url": "git+https://github.com/cola-sk/agent-cli-unified.git"
   },
   "bugs": {
-    "url": "https://github.com/your-github-username/agent-cli-unified/issues"
+    "url": "https://github.com/cola-sk/agent-cli-unified/issues"
   },
-  "homepage": "https://github.com/your-github-username/agent-cli-unified#readme"
+  "homepage": "https://github.com/cola-sk/agent-cli-unified#readme"
 }
