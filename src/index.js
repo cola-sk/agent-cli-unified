@@ -506,6 +506,18 @@ function parseAgentEvent(line) {
       const itemType = String(item.type || '');
       const itemId = String(item.id || '');
 
+      if (eventType === 'item.completed' && itemType === 'agent_message') {
+        const text =
+          (typeof item.text === 'string' && item.text) ||
+          (typeof item.content === 'string' && item.content) ||
+          (typeof item.message === 'string' && item.message) ||
+          '';
+
+        if (text) {
+          return { type: 'text', text };
+        }
+      }
+
       if (eventType === 'item.started') {
         const input = {};
         if (typeof item.command === 'string') {

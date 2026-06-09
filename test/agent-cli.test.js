@@ -284,6 +284,23 @@ test('parseAgentEvent handles Codex item.started and item.completed', () => {
   });
 });
 
+test('parseAgentEvent handles Codex final agent_message item as text', () => {
+  const line = JSON.stringify({
+    type: 'item.completed',
+    item: {
+      id: 'item_0',
+      type: 'agent_message',
+      text: 'Final answer'
+    }
+  });
+
+  const parsed = parseAgentEvent(line);
+  assert.deepEqual(parsed, {
+    type: 'text',
+    text: 'Final answer'
+  });
+});
+
 test('path verification functions validate path boundaries', () => {
   const workspace = '/tmp/my-workspace';
   
@@ -366,4 +383,3 @@ test('runCliAgent enforces active-kill sandbox on unauthorized access', async ()
   assert.equal(errorCaught.code, 'SECURITY_VIOLATION');
   assert.ok(errorCaught.message.includes('unauthorized path'));
 });
-
