@@ -452,6 +452,39 @@ function parseAgentEvent(line) {
       return out.length > 0 ? out : null;
     }
 
+    // 1b. Nested Gemini/standard message content events (unpacks tool calls and text)
+    if (eventType === 'message' && (json.role === 'assistant' || json.role === 'model') && Array.isArray(json.content)) {
+      const out = [];
+      for (const block of json.content) {
+        if ((block.type === 'text' || block.type === 'content') && (block.text || block.content)) {
+          out.push({ type: 'text', text: block.text || block.content });
+        } else if (block.type === 'thinking' && block.thinking) {
+          out.push({ type: 'thinking', text: block.thinking });
+        } else if (block.type === 'tool_use' || block.type === 'tool_call' || block.type === 'functionCall') {
+          out.push({
+            type: 'tool_use',
+            name: block.name || block.function || '',
+            input: block.input || block.args || {},
+            toolUseId: block.id || '',
+          });
+        }
+      }
+      return out.length > 0 ? out : null;
+    }
+
+    // 1c. Flat Gemini/standard message content events
+    if (eventType === 'message' && (json.role === 'assistant' || json.role === 'model') && typeof json.content === 'string') {
+      return { type: 'text', text: json.content };
+    }
+
+    // 1d. Standard result/final event
+    if (eventType === 'result') {
+      const resText = json.result || json.content || json.value || '';
+      if (resText && typeof resText === 'string') {
+        return { type: 'text', text: resText };
+      }
+    }
+
     if (eventType === 'user' && json.message && Array.isArray(json.message.content)) {
       const out = [];
       for (const block of json.message.content) {

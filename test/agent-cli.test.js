@@ -202,6 +202,37 @@ test('parseAgentEvent handles Claude Code nested assistant event', () => {
   assert.deepEqual(parsed[2], { type: 'tool_use', toolUseId: 'use_1', name: 'read_file', input: { path: 'a.txt' } });
 });
 
+test('parseAgentEvent handles Gemini nested, flat message, and result events', () => {
+  const nestedLine = JSON.stringify({
+    type: 'message',
+    role: 'assistant',
+    content: [
+      { type: 'text', text: 'Hello!' },
+      { type: 'tool_call', name: 'search', args: { query: 'test' } }
+    ]
+  });
+  const nestedParsed = parseAgentEvent(nestedLine);
+  assert.ok(Array.isArray(nestedParsed));
+  assert.equal(nestedParsed.length, 2);
+  assert.deepEqual(nestedParsed[0], { type: 'text', text: 'Hello!' });
+  assert.deepEqual(nestedParsed[1], { type: 'tool_use', toolUseId: '', name: 'search', input: { query: 'test' } });
+
+  const flatLine = JSON.stringify({
+    type: 'message',
+    role: 'assistant',
+    content: 'Greeting'
+  });
+  const flatParsed = parseAgentEvent(flatLine);
+  assert.deepEqual(flatParsed, { type: 'text', text: 'Greeting' });
+
+  const resultLine = JSON.stringify({
+    type: 'result',
+    result: 'Final Output Summary'
+  });
+  const resultParsed = parseAgentEvent(resultLine);
+  assert.deepEqual(resultParsed, { type: 'text', text: 'Final Output Summary' });
+});
+
 test('parseAgentEvent handles Claude Code nested user event', () => {
   const line = JSON.stringify({
     type: 'user',
