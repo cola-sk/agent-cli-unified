@@ -453,3 +453,355 @@ test('runCliAgent enforces active-kill sandbox on unauthorized access', async ()
   assert.equal(errorCaught.code, 'SECURITY_VIOLATION');
   assert.ok(errorCaught.message.includes('unauthorized path'));
 });
+
+// =====================================================================
+// 🔴 High Priority — Error Paths
+// =====================================================================
+
+test('runCliAgent returns timedOut when process exceeds timeoutMs', async () => {
+  const result = await runCliAgent({
+    agent: 'claude',
+    prompt: 'ignored',
+    commandPath: process.execPath,
+    argsOverride: ['-e', 'setTimeout(() => {}, 30000)'],
+    timeoutMs: 500,
+  });
+  assert.equal(result.timedOut, true);
+  assert.equal(result.ok, false);
+  assert.equal(result.timeoutMs, 500);
+});
+
+test('runCliAgent reports non-zero exit code', async () => {
+  const result = await runCliAgent({
+    agent: 'claude',
+    prompt: 'ignored',
+    commandPath: process.execPath,
+    argsOverride: ['-e', 'process.exit(42)'],
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.exitCode, 42);
+});
+
+test('runCliAgent rejects on ENOENT for non-existent binary', async () => {
+  await assert.rejects(
+    () => runCliAgent({
+      agent: 'claude',
+      prompt: 'test',
+      commandPath: '/nonexistent/binary-that-does-not-exist',
+      argsOverride: [],
+    }),
+    (err) => err.code === 'ENOENT'
+  );
+});
+
+// =====================================================================
+// 🔴 High Priority — Streaming callback verification
+// =====================================================================
+
+test('runCliAgent invokes onStdout and onStderr callbacks', async () => {
+  const stdoutLines = [];
+  const stderrLines = [];
+  await runCliAgent({
+    agent: 'claude',
+    prompt: 'ignored',
+    commandPath: process.execPath,
+    argsOverride: ['-e', 'console.log("stdout_marker"); console.error("stderr_marker");'],
+    onStdout: (line) => stdoutLines.push(line),
+    onStderr: (line) => stderrLines.push(line),
+  });
+  assert.ok(stdoutLines.some((l) => l.includes('stdout_marker')), 'onStdout should receive stdout lines');
+  assert.ok(stderrLines.some((l) => l.includes('stderr_marker')), 'onStderr should receive stderr lines');
+});
+
+test('runCliAgent emits events in correct order for multi-step output', async () => {
+  const eventTypes = [];
+  await runCliAgent({
+    agent: 'claude',
+    prompt: 'ignored',
+    commandPath: process.execPath,
+    argsOverride: [
+      '-e',
+      [
+        'console.log(JSON.stringify({type:"content",text:"step1"}));',
+        'console.log(JSON.stringify({type:"tool_use",name:"bash",input:{cmd:"ls"}}));',
+        'console.log(JSON.stringify({type:"tool_result",output:"file.txt",tool_use_id:"t1"}));',
+        'console.log(JSON.stringify({type:"content",text:"step2"}));',
+      ].join(' '),
+    ],
+    onEvent: (e) => eventTypes.push(e.type),
+  });
+  assert.deepEqual(eventTypes, ['text', 'tool_use', 'tool_result', 'text']);
+});
+
+// =====================================================================
+// 🟡 Medium Priority — parseAgentEvent edge cases
+// =====================================================================
+
+test('parseAgentEvent returns null for empty or blank input', () => {
+  assert.equal(parseAgentEvent(''), null);
+  assert.equal(parseAgentEvent('   '), null);
+  assert.equal(parseAgentEvent(null), null);
+  assert.equal(parseAgentEvent(undefined), null);
+});
+
+test('parseAgentEvent returns text for non-JSON plain text', () => {
+  const r = parseAgentEvent('this is plain text');
+  assert.equal(r.type, 'text');
+  assert.equal(r.text, 'this is plain text');
+});
+
+test('parseAgentEvent returns text for malformed JSON', () => {
+  const r = parseAgentEvent('{"truncated": tru');
+  assert.equal(r.type, 'text');
+  assert.ok(r.text.includes('truncated'));
+});
+
+test('parseAgentEvent handles error event', () => {
+  const e = parseAgentEvent('{"type":"error","message":"something broke"}');
+  assert.equal(e.type, 'error');
+  assert.equal(e.text, 'something broke');
+});
+
+test('parseAgentEvent handles error event with content field', () => {
+  const e = parseAgentEvent('{"type":"error","content":"fatal crash"}');
+  assert.equal(e.type, 'error');
+  assert.equal(e.text, 'fatal crash');
+});
+
+test('parseAgentEvent handles system init event', () => {
+  const e = parseAgentEvent('{"type":"system","subtype":"init","cwd":"/tmp/workspace"}');
+  assert.equal(e.type, 'system');
+  assert.ok(e.text.includes('/tmp/workspace'));
+});
+
+test('parseAgentEvent handles system hook_started event', () => {
+  const e = parseAgentEvent('{"type":"system","subtype":"hook_started","hook_name":"pre-commit"}');
+  assert.equal(e.type, 'system');
+  assert.ok(e.text.includes('pre-commit'));
+});
+
+test('parseAgentEvent handles system hook_response event', () => {
+  const e = parseAgentEvent('{"type":"system","subtype":"hook_response","hook_name":"post-run"}');
+  assert.equal(e.type, 'system');
+  assert.ok(e.text.includes('post-run'));
+});
+
+test('parseAgentEvent handles assistant.reasoning (thinking)', () => {
+  const e = parseAgentEvent('{"type":"assistant.reasoning","data":{"content":"Let me think about this..."}}');
+  assert.equal(e.type, 'thinking');
+  assert.equal(e.text, 'Let me think about this...');
+});
+
+test('parseAgentEvent handles assistant.reasoning with top-level content', () => {
+  const e = parseAgentEvent('{"type":"assistant.reasoning","content":"Reasoning here"}');
+  assert.equal(e.type, 'thinking');
+  assert.equal(e.text, 'Reasoning here');
+});
+
+test('parseAgentEvent handles direct tool_use event', () => {
+  const e = parseAgentEvent('{"type":"tool_use","name":"write_file","input":{"path":"a.txt","content":"hello"},"id":"tu_1"}');
+  assert.equal(e.type, 'tool_use');
+  assert.equal(e.name, 'write_file');
+  assert.deepEqual(e.input, { path: 'a.txt', content: 'hello' });
+  assert.equal(e.toolUseId, 'tu_1');
+});
+
+test('parseAgentEvent handles direct functionCall event (Gemini style)', () => {
+  const e = parseAgentEvent('{"type":"functionCall","name":"search","input":{"q":"test"},"id":"fc_1"}');
+  assert.equal(e.type, 'tool_use');
+  assert.equal(e.name, 'search');
+  assert.deepEqual(e.input, { q: 'test' });
+  assert.equal(e.toolUseId, 'fc_1');
+});
+
+test('parseAgentEvent handles direct tool_result event', () => {
+  const e = parseAgentEvent('{"type":"tool_result","output":"file contents here","tool_use_id":"t1"}');
+  assert.equal(e.type, 'tool_result');
+  assert.equal(e.content, 'file contents here');
+  assert.equal(e.toolUseId, 't1');
+  assert.equal(e.isError, false);
+});
+
+test('parseAgentEvent handles direct tool_result with error', () => {
+  const e = parseAgentEvent('{"type":"tool_result","output":"not found","tool_use_id":"t2","is_error":true}');
+  assert.equal(e.type, 'tool_result');
+  assert.equal(e.isError, true);
+});
+
+test('parseAgentEvent handles functionResponse event (Gemini style)', () => {
+  const e = parseAgentEvent('{"type":"functionResponse","functionResponse":{"response":"result data"},"id":"fr_1"}');
+  assert.equal(e.type, 'tool_result');
+  assert.equal(e.content, 'result data');
+  assert.equal(e.toolUseId, 'fr_1');
+});
+
+test('parseAgentEvent handles type "text" event', () => {
+  const e = parseAgentEvent('{"type":"text","text":"direct text event"}');
+  assert.equal(e.type, 'text');
+  assert.equal(e.text, 'direct text event');
+});
+
+test('parseAgentEvent handles type "text" event with value field', () => {
+  const e = parseAgentEvent('{"type":"text","value":"value text"}');
+  assert.equal(e.type, 'text');
+  assert.equal(e.text, 'value text');
+});
+
+test('parseAgentEvent falls back to json type for unknown event types', () => {
+  const e = parseAgentEvent('{"type":"unknown_custom_event","data":"something"}');
+  assert.equal(e.type, 'json');
+  assert.deepEqual(e.payload, { type: 'unknown_custom_event', data: 'something' });
+});
+
+test('parseAgentEvent falls back to json type for JSON without type field', () => {
+  const e = parseAgentEvent('{"foo":"bar","baz":42}');
+  assert.equal(e.type, 'json');
+  assert.deepEqual(e.payload, { foo: 'bar', baz: 42 });
+});
+
+// Nested Gemini content block with "content" type (alternative to "text")
+test('parseAgentEvent handles Gemini nested content block with "content" type', () => {
+  const line = JSON.stringify({
+    type: 'message',
+    role: 'model',
+    content: [
+      { type: 'content', content: 'Model output text' },
+    ],
+  });
+  const parsed = parseAgentEvent(line);
+  assert.ok(Array.isArray(parsed));
+  assert.equal(parsed[0].type, 'text');
+  assert.equal(parsed[0].text, 'Model output text');
+});
+
+// =====================================================================
+// 🟡 Medium Priority — buildCliInvocation edge cases
+// =====================================================================
+
+test('buildCliInvocation throws when prompt is empty', () => {
+  assert.throws(
+    () => buildCliInvocation({ agent: 'claude', prompt: '', commandPath: '/bin/claude' }),
+    /prompt is required/
+  );
+});
+
+test('buildCliInvocation throws when prompt is whitespace-only', () => {
+  assert.throws(
+    () => buildCliInvocation({ agent: 'claude', prompt: '   ', commandPath: '/bin/claude' }),
+    /prompt is required/
+  );
+});
+
+test('buildCliInvocation throws when executable not found', () => {
+  assert.throws(
+    () => buildCliInvocation({
+      agent: 'claude',
+      prompt: 'test',
+      findExecutable: () => null,
+    }),
+    /Executable not found/
+  );
+});
+
+test('buildCliInvocation supports argsOverride', () => {
+  const invocation = buildCliInvocation({
+    agent: 'claude',
+    prompt: 'test',
+    commandPath: '/bin/claude',
+    argsOverride: ['--custom-flag', 'value'],
+  });
+  assert.deepEqual(invocation.args, ['--custom-flag', 'value']);
+});
+
+test('buildCliInvocation appends extraArgs', () => {
+  const invocation = buildCliInvocation({
+    agent: 'claude',
+    prompt: 'test',
+    commandPath: '/bin/claude',
+    extraArgs: ['--extra1', '--extra2'],
+  });
+  assert.ok(invocation.args.includes('--extra1'));
+  assert.ok(invocation.args.includes('--extra2'));
+  // extraArgs should be at the end
+  const idx1 = invocation.args.indexOf('--extra1');
+  assert.equal(invocation.args[idx1 + 1], '--extra2');
+});
+
+test('buildCliInvocation supports geminiPromptStyle positional', () => {
+  const invocation = buildCliInvocation({
+    agent: 'gemini',
+    prompt: 'hello world',
+    commandPath: '/bin/gemini',
+    cliOptions: { geminiPromptStyle: 'positional' },
+  });
+  // Should NOT use -p flag; prompt should appear as positional arg
+  const pIndex = invocation.args.indexOf('-p');
+  assert.equal(pIndex, -1, 'Should not use -p flag in positional mode');
+  assert.ok(invocation.args.includes('hello world'), 'Prompt should be a positional argument');
+});
+
+test('buildCliInvocation supports copilot custom output format and stream mode', () => {
+  const invocation = buildCliInvocation({
+    agent: 'copilot',
+    prompt: 'test',
+    commandPath: '/bin/copilot',
+    cliOptions: {
+      copilotOutputFormat: 'text',
+      copilotStreamMode: 'off',
+    },
+  });
+  const fmtIdx = invocation.args.indexOf('--output-format');
+  assert.equal(invocation.args[fmtIdx + 1], 'text');
+  const streamIdx = invocation.args.indexOf('--stream');
+  assert.equal(invocation.args[streamIdx + 1], 'off');
+});
+
+// =====================================================================
+// 🟡 Medium Priority — resolveCwd tilde expansion
+// =====================================================================
+
+test('resolveCwd expands ~ to home directory', () => {
+  const home = require('os').homedir();
+  const resolved = resolveCwd('~/projects');
+  assert.equal(resolved, require('path').join(home, 'projects'));
+});
+
+test('resolveCwd expands ~/nested/path correctly', () => {
+  const home = require('os').homedir();
+  const resolved = resolveCwd('~/a/b/c');
+  assert.equal(resolved, require('path').join(home, 'a/b/c'));
+});
+
+// =====================================================================
+// 🟡 Medium Priority — stderr error event propagation
+// =====================================================================
+
+test('runCliAgent captures error events from stderr into events array', async () => {
+  const result = await runCliAgent({
+    agent: 'claude',
+    prompt: 'ignored',
+    commandPath: process.execPath,
+    argsOverride: [
+      '-e',
+      'console.error(JSON.stringify({type:"error",message:"stderr error msg"}));',
+    ],
+  });
+  const errorEvents = result.events.filter((e) => e.type === 'error');
+  assert.ok(errorEvents.length > 0, 'Should capture error events from stderr');
+  assert.equal(errorEvents[0].text, 'stderr error msg');
+});
+
+test('runCliAgent does not capture non-error events from stderr', async () => {
+  const result = await runCliAgent({
+    agent: 'claude',
+    prompt: 'ignored',
+    commandPath: process.execPath,
+    argsOverride: [
+      '-e',
+      'console.error(JSON.stringify({type:"content",text:"not an error"}));',
+    ],
+  });
+  // "content" type from stderr should NOT be added to events
+  const contentEvents = result.events.filter((e) => e.type === 'text');
+  assert.equal(contentEvents.length, 0, 'Non-error events from stderr should not be in events array');
+});

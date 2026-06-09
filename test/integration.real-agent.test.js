@@ -136,3 +136,215 @@ test(
     assert.ok(hasToolUse, 'Should have logged at least one structured tool_use event');
   }
 );
+
+// =====================================================================
+// All-agent tool_use event verification
+// =====================================================================
+
+for (const agentId of REQUESTED_AGENTS) {
+  test(
+    `real e2e: ${agentId} should emit tool_use events when using tools`,
+    {
+      skip: RUN_REAL ? false : 'Set RUN_REAL_AGENT_E2E=1 to run real agent CLI integration tests.',
+      timeout: REAL_TIMEOUT_MS + 5000,
+    },
+    async (t) => {
+      if (!AGENT_DEFINITIONS[agentId]) {
+        t.skip(`Unknown agent "${agentId}"`);
+        return;
+      }
+
+      const detected = detectCliAgents().find((x) => x.id === agentId);
+      if (!detected || !detected.available) {
+        t.skip(`${agentId} CLI is not installed or not found in PATH`);
+        return;
+      }
+
+      const eventSequence = [];
+
+      const result = await runCliAgent({
+        agent: agentId,
+        prompt: [
+          'You are in an automated integration test.',
+          'List the files in the current directory using your shell or file listing tool.',
+          'Then report what you found.',
+        ].join('\n'),
+        cwd: path.resolve(__dirname, '..'),
+        timeoutMs: REAL_TIMEOUT_MS,
+        onEvent: (event) => {
+          if (event && event.type) {
+            eventSequence.push(event.type);
+          }
+        },
+      });
+
+      assert.equal(
+        result.timedOut,
+        false,
+        `${agentId} timed out. STDERR:\n${result.stderr || '(empty)'}`
+      );
+      assert.equal(
+        result.ok,
+        true,
+        `${agentId} exited with code ${result.exitCode}. STDERR:\n${result.stderr || '(empty)'}`
+      );
+
+      const hasToolUse = eventSequence.includes('tool_use');
+      assert.ok(
+        hasToolUse,
+        `${agentId} should emit tool_use events. Got event types: ${[...new Set(eventSequence)].join(', ')}`
+      );
+    }
+  );
+}
+
+// =====================================================================
+// All-agent tool_result event verification
+// =====================================================================
+
+for (const agentId of REQUESTED_AGENTS) {
+  test(
+    `real e2e: ${agentId} should emit tool_result events after tool execution`,
+    {
+      skip: RUN_REAL ? false : 'Set RUN_REAL_AGENT_E2E=1 to run real agent CLI integration tests.',
+      timeout: REAL_TIMEOUT_MS + 5000,
+    },
+    async (t) => {
+      if (!AGENT_DEFINITIONS[agentId]) {
+        t.skip(`Unknown agent "${agentId}"`);
+        return;
+      }
+
+      const detected = detectCliAgents().find((x) => x.id === agentId);
+      if (!detected || !detected.available) {
+        t.skip(`${agentId} CLI is not installed or not found in PATH`);
+        return;
+      }
+
+      const eventSequence = [];
+
+      const result = await runCliAgent({
+        agent: agentId,
+        prompt: [
+          'You are in an automated integration test.',
+          'Read the contents of the file named "package.json" in the current directory.',
+          'Report the "name" field from the file.',
+        ].join('\n'),
+        cwd: path.resolve(__dirname, '..'),
+        timeoutMs: REAL_TIMEOUT_MS,
+        onEvent: (event) => {
+          if (event && event.type) {
+            eventSequence.push(event.type);
+          }
+        },
+      });
+
+      assert.equal(result.ok, true, `${agentId} exited with code ${result.exitCode}`);
+
+      const hasToolResult = eventSequence.includes('tool_result');
+      assert.ok(
+        hasToolResult,
+        `${agentId} should emit tool_result events. Got event types: ${[...new Set(eventSequence)].join(', ')}`
+      );
+    }
+  );
+}
+
+// =====================================================================
+// Streaming onStdout callback verification
+// =====================================================================
+
+for (const agentId of REQUESTED_AGENTS) {
+  test(
+    `real e2e: ${agentId} onStdout fires during streaming`,
+    {
+      skip: RUN_REAL ? false : 'Set RUN_REAL_AGENT_E2E=1 to run real agent CLI integration tests.',
+      timeout: REAL_TIMEOUT_MS + 5000,
+    },
+    async (t) => {
+      if (!AGENT_DEFINITIONS[agentId]) {
+        t.skip(`Unknown agent "${agentId}"`);
+        return;
+      }
+
+      const detected = detectCliAgents().find((x) => x.id === agentId);
+      if (!detected || !detected.available) {
+        t.skip(`${agentId} CLI is not installed or not found in PATH`);
+        return;
+      }
+
+      const stdoutCalls = [];
+
+      const result = await runCliAgent({
+        agent: agentId,
+        prompt: [
+          'You are in an automated integration test.',
+          'Say "hello world" and nothing else.',
+        ].join('\n'),
+        timeoutMs: REAL_TIMEOUT_MS,
+        onStdout: (line) => stdoutCalls.push(line),
+      });
+
+      assert.equal(result.ok, true, `${agentId} exited with code ${result.exitCode}`);
+      assert.ok(
+        stdoutCalls.length > 0,
+        `${agentId}: onStdout should fire at least once during streaming. Got 0 calls.`
+      );
+    }
+  );
+}
+
+// =====================================================================
+// Event sequence ordering verification
+// =====================================================================
+
+for (const agentId of REQUESTED_AGENTS) {
+  test(
+    `real e2e: ${agentId} events follow logical ordering (tool_use before tool_result)`,
+    {
+      skip: RUN_REAL ? false : 'Set RUN_REAL_AGENT_E2E=1 to run real agent CLI integration tests.',
+      timeout: REAL_TIMEOUT_MS + 5000,
+    },
+    async (t) => {
+      if (!AGENT_DEFINITIONS[agentId]) {
+        t.skip(`Unknown agent "${agentId}"`);
+        return;
+      }
+
+      const detected = detectCliAgents().find((x) => x.id === agentId);
+      if (!detected || !detected.available) {
+        t.skip(`${agentId} CLI is not installed or not found in PATH`);
+        return;
+      }
+
+      const eventSequence = [];
+
+      const result = await runCliAgent({
+        agent: agentId,
+        prompt: [
+          'You are in an automated integration test.',
+          'List files in the current directory using a tool, then summarize what you see.',
+        ].join('\n'),
+        cwd: path.resolve(__dirname, '..'),
+        timeoutMs: REAL_TIMEOUT_MS,
+        onEvent: (event) => {
+          if (event && event.type) {
+            eventSequence.push(event.type);
+          }
+        },
+      });
+
+      assert.equal(result.ok, true, `${agentId} exited with code ${result.exitCode}`);
+
+      const firstToolUse = eventSequence.indexOf('tool_use');
+      const firstToolResult = eventSequence.indexOf('tool_result');
+
+      if (firstToolUse >= 0 && firstToolResult >= 0) {
+        assert.ok(
+          firstToolUse < firstToolResult,
+          `${agentId}: tool_use (index ${firstToolUse}) should appear before tool_result (index ${firstToolResult}). Sequence: ${eventSequence.join(' → ')}`
+        );
+      }
+    }
+  );
+}
