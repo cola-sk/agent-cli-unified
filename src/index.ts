@@ -685,6 +685,42 @@ function parseAgentEvent(line: string): any {
       };
     }
 
+    // Copilot CLI JSONL tool lifecycle events
+    if (eventType === 'tool.execution_start') {
+      const data = json.data && typeof json.data === 'object' ? json.data : {};
+      return {
+        type: 'tool_use',
+        name: data.toolName || json.toolName || '',
+        input: data.arguments || json.arguments || {},
+        toolUseId: data.toolCallId || json.toolCallId || json.id || '',
+      };
+    }
+
+    if (eventType === 'tool.execution_complete') {
+      const data = json.data && typeof json.data === 'object' ? json.data : {};
+      const result = data.result && typeof data.result === 'object' ? data.result : {};
+      const content =
+        result.content ||
+        result.detailedContent ||
+        data.content ||
+        data.output ||
+        json.content ||
+        '';
+      return {
+        type: 'tool_result',
+        content: typeof content === 'object' ? JSON.stringify(content) : content,
+        isError: data.success === false || json.success === false || !!data.error || !!json.error,
+        toolUseId: data.toolCallId || json.toolCallId || json.id || '',
+      };
+    }
+
+    if (eventType === 'assistant.reasoning') {
+      const content = json?.data?.content || json.content || '';
+      if (content && typeof content === 'string') {
+        return { type: 'thinking', text: content };
+      }
+    }
+
     if (eventType === 'tool_use' || eventType === 'tool_call' || eventType === 'functionCall') {
       return {
         type: 'tool_use',

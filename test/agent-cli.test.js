@@ -309,6 +309,51 @@ test('parseAgentEvent handles Codex item.started and item.completed', () => {
   });
 });
 
+test('parseAgentEvent handles Copilot tool execution lifecycle events', () => {
+  const startLine = JSON.stringify({
+    type: 'tool.execution_start',
+    data: {
+      toolCallId: 'call_1',
+      toolName: 'bash',
+      arguments: {
+        command: 'pwd && ls',
+        description: 'Show current directory and list files'
+      }
+    }
+  });
+
+  const startParsed = parseAgentEvent(startLine);
+  assert.deepEqual(startParsed, {
+    type: 'tool_use',
+    name: 'bash',
+    input: {
+      command: 'pwd && ls',
+      description: 'Show current directory and list files'
+    },
+    toolUseId: 'call_1'
+  });
+
+  const completeLine = JSON.stringify({
+    type: 'tool.execution_complete',
+    data: {
+      toolCallId: 'call_1',
+      success: true,
+      result: {
+        content: '/tmp/probe\nprobe.txt\n<exited with exit code 0>',
+        detailedContent: '/tmp/probe\nprobe.txt\n<exited with exit code 0>'
+      }
+    }
+  });
+
+  const completeParsed = parseAgentEvent(completeLine);
+  assert.deepEqual(completeParsed, {
+    type: 'tool_result',
+    content: '/tmp/probe\nprobe.txt\n<exited with exit code 0>',
+    isError: false,
+    toolUseId: 'call_1'
+  });
+});
+
 test('parseAgentEvent handles Codex final agent_message item as text', () => {
   const line = JSON.stringify({
     type: 'item.completed',

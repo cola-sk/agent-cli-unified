@@ -1,6 +1,6 @@
 {
   "name": "@sking7/agent-cli-unified",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Unified command builder and runner for Codex, Claude Code, Gemini, and Copilot CLI",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
