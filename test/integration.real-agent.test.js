@@ -7,7 +7,7 @@ const {
   AGENT_DEFINITIONS,
   detectCliAgents,
   runCliAgent,
-} = require('../src/index');
+} = require('../dist/index');
 
 const RUN_REAL = process.env.RUN_REAL_AGENT_E2E === '1';
 const REQUESTED_AGENTS = (process.env.REAL_AGENT_LIST || 'codex,claude,gemini,copilot')
@@ -136,4 +136,3 @@ test(
     assert.ok(hasToolUse, 'Should have logged at least one structured tool_use event');
   }
 );
-

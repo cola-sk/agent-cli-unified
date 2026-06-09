@@ -1,11 +1,12 @@
 {
   "name": "@sking7/agent-cli-unified",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Unified command builder and runner for Codex, Claude Code, Gemini, and Copilot CLI",
-  "main": "src/index.js",
-  "types": "src/index.d.ts",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "type": "commonjs",
   "files": [
+    "dist",
     "src",
     "README.md",
     "LICENSE"
@@ -15,10 +16,12 @@
     "access": "public"
   },
   "scripts": {
-    "test": "node --test test/agent-cli.test.js",
-    "test:real": "RUN_REAL_AGENT_E2E=1 node --test test/integration.real-agent.test.js",
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test test/agent-cli.test.js",
+    "test:real": "npm run build && RUN_REAL_AGENT_E2E=1 node --test test/integration.real-agent.test.js",
     "test:all": "npm test && npm run test:real",
-    "check": "node --check src/index.js",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "prepack": "npm run build",
     "prepublishOnly": "npm run check && npm test"
   },
   "keywords": [
@@ -38,5 +41,9 @@
   "bugs": {
     "url": "https://github.com/cola-sk/agent-cli-unified/issues"
   },
-  "homepage": "https://github.com/cola-sk/agent-cli-unified#readme"
+  "homepage": "https://github.com/cola-sk/agent-cli-unified#readme",
+  "devDependencies": {
+    "@types/node": "^25.9.2",
+    "typescript": "^6.0.3"
+  }
 }

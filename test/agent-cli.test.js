@@ -12,7 +12,7 @@ const {
   buildPromptWithImageFiles,
   isAttemptingUnauthorizedAccess,
   explicitlyRequestsExternalAccess,
-} = require('../src/index');
+} = require('../dist/index');
 const fs = require('fs');
 
 test('normalizeAgent resolves aliases and defaults', () => {

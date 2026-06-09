@@ -1,11 +1,111 @@
-const { spawn, execSync } = require('child_process');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
+import { spawn, execSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+export interface AgentDefinition {
+  id: string;
+  aliases: string[];
+  binary: string;
+  label: string;
+  subLabel: string;
+  type: string;
+  versionFlag: string;
+}
+
+export interface DetectedAgent {
+  id: string;
+  label: string;
+  subLabel: string;
+  type: string;
+  binary: string;
+  available: boolean;
+  executablePath: string | null;
+  version: string | null;
+}
+
+export interface CliOptions {
+  bypassConfirmations?: boolean;
+  disableUpdateCheck?: boolean;
+  skipGitRepoCheck?: boolean;
+  includeHookEvents?: boolean;
+  verbose?: boolean;
+  print?: boolean;
+  geminiPromptStyle?: 'flag' | 'positional';
+  claudeOutputFormat?: string;
+  geminiOutputFormat?: string;
+  copilotOutputFormat?: string;
+  copilotStreamMode?: string;
+  skipTrust?: boolean;
+  [key: string]: any;
+}
+
+export interface SandboxOptions {
+  restrictToWorkspace?: boolean;
+}
+
+export interface Attachment {
+  name: string;
+  mimeType: string;
+  base64Data: string;
+}
+
+export interface MaterializedAttachment {
+  filePath: string;
+  mimeType: string;
+  name: string;
+}
+
+export interface BuildCliInvocationOptions {
+  agent?: string;
+  prompt: string;
+  cwd?: string;
+  systemPrompt?: string;
+  model?: string;
+  commandPath?: string;
+  argsTemplate?: string[];
+  argsOverride?: string[];
+  extraArgs?: string[];
+  env?: Record<string, string | undefined>;
+  sandbox?: SandboxOptions;
+  cliOptions?: CliOptions;
+  findExecutable?: (binary: string) => string | null;
+}
+
+export interface CliInvocation {
+  agent: string;
+  label: string;
+  binary: string;
+  command: string;
+  args: string[];
+  cwd: string;
+  env: Record<string, string | undefined>;
+  prompt: string;
+}
+
+export interface RunCliAgentOptions extends BuildCliInvocationOptions {
+  timeoutMs?: number;
+  attachments?: Attachment[];
+  onEvent?: (event: any) => void;
+  onStdout?: (line: string) => void;
+  onStderr?: (line: string) => void;
+}
+
+export interface RunCliAgentResult {
+  invocation: CliInvocation;
+  exitCode: number | null;
+  signal: string | null;
+  ok: boolean;
+  stdout: string;
+  stderr: string;
+  events: any[];
+  timedOut: boolean;
+  timeoutMs: number | null;
+}
 
 const DEFAULT_AGENT = 'claude';
 
-const AGENT_DEFINITIONS = Object.freeze({
+const AGENT_DEFINITIONS: Record<string, AgentDefinition> = Object.freeze({
   claude: {
     id: 'claude',
     aliases: ['claude-code', 'claude-agent'],
@@ -44,21 +144,21 @@ const AGENT_DEFINITIONS = Object.freeze({
   },
 });
 
-const AGENT_ALIAS_MAP = Object.freeze(
+const AGENT_ALIAS_MAP: Record<string, string> = Object.freeze(
   Object.values(AGENT_DEFINITIONS).reduce((acc, item) => {
     acc[item.id] = item.id;
     for (const alias of item.aliases) acc[alias] = item.id;
     return acc;
-  }, {})
+  }, {} as Record<string, string>)
 );
 
-function normalizeAgent(agent) {
+function normalizeAgent(agent?: string): string {
   const key = String(agent || '').trim().toLowerCase();
   if (!key) return DEFAULT_AGENT;
   return AGENT_ALIAS_MAP[key] || DEFAULT_AGENT;
 }
 
-function resolveCwd(cwd) {
+function resolveCwd(cwd?: string): string {
   if (typeof cwd === 'string' && cwd.trim()) {
     const trimmed = cwd.trim();
     if (trimmed.startsWith('~')) {
@@ -69,7 +169,7 @@ function resolveCwd(cwd) {
   return os.homedir();
 }
 
-function buildCliPath() {
+function buildCliPath(): string {
   const existing = process.env.PATH || '';
   const home = os.homedir();
   const extras = [
@@ -82,7 +182,7 @@ function buildCliPath() {
   return [...new Set([...existing.split(':'), ...extras].filter(Boolean))].join(':');
 }
 
-function findExecutable(binary) {
+function findExecutable(binary: string): string | null {
   try {
     const located = execSync(`which ${binary}`, { encoding: 'utf8', stdio: [] }).trim();
     if (located && fs.existsSync(located)) return located;
@@ -103,7 +203,7 @@ function findExecutable(binary) {
   return null;
 }
 
-function getExecutableVersion(execPath, versionFlag = '--version') {
+function getExecutableVersion(execPath: string, versionFlag = '--version'): string | null {
   try {
     const out = execSync(`"${execPath}" ${versionFlag}`, {
       encoding: 'utf8',
@@ -121,7 +221,7 @@ function getExecutableVersion(execPath, versionFlag = '--version') {
   }
 }
 
-function defaultEnv(extra = {}) {
+function defaultEnv(extra: Record<string, string | undefined> = {}): Record<string, string | undefined> {
   return {
     ...process.env,
     PATH: buildCliPath(),
@@ -138,7 +238,13 @@ function defaultEnv(extra = {}) {
   };
 }
 
-function buildAgentArgs(agentId, payload) {
+function buildAgentArgs(agentId: string, payload: {
+  prompt: string;
+  cwd: string;
+  systemPrompt?: string;
+  model?: string;
+  cliOptions?: CliOptions;
+}): string[] {
   const {
     prompt,
     cwd,
@@ -208,7 +314,10 @@ function buildAgentArgs(agentId, payload) {
   return [prompt];
 }
 
-function detectCliAgents(options = {}) {
+function detectCliAgents(options: {
+  findExecutable?: (binary: string) => string | null;
+  getVersion?: (execPath: string, versionFlag?: string) => string | null;
+} = {}): DetectedAgent[] {
   const find = options.findExecutable || findExecutable;
   const version = options.getVersion || getExecutableVersion;
 
@@ -239,7 +348,7 @@ function detectCliAgents(options = {}) {
   });
 }
 
-function explicitlyRequestsExternalAccess(userContent, workspacePath) {
+function explicitlyRequestsExternalAccess(userContent: string, workspacePath?: string | null): boolean {
   if (!workspacePath) return false;
   
   // Find all absolute paths in userContent
@@ -263,7 +372,7 @@ function explicitlyRequestsExternalAccess(userContent, workspacePath) {
   return keywords.some(kw => lowercaseContent.includes(kw));
 }
 
-function isAttemptingUnauthorizedAccess(toolName, input, workspacePath) {
+function isAttemptingUnauthorizedAccess(toolName: string, input: Record<string, any>, workspacePath: string): boolean {
   if (!toolName || !input) return false;
   
   // 1. Validate file path parameters
@@ -302,7 +411,7 @@ function isAttemptingUnauthorizedAccess(toolName, input, workspacePath) {
   return false;
 }
 
-function buildCliInvocation(options = {}) {
+function buildCliInvocation(options: BuildCliInvocationOptions = {} as BuildCliInvocationOptions): CliInvocation {
   let prompt = String(options.prompt || '').trim();
   if (!prompt) {
     throw new Error('prompt is required');
@@ -401,19 +510,22 @@ function buildCliInvocation(options = {}) {
 }
 
 class LineBuffer {
-  constructor(onLine) {
+  private _buffer: string;
+  private _onLine: (line: string) => void;
+
+  constructor(onLine: (line: string) => void) {
     this._buffer = '';
     this._onLine = onLine;
   }
 
-  append(chunk) {
+  append(chunk: string): void {
     this._buffer += chunk;
     const lines = this._buffer.split('\n');
     this._buffer = lines.pop() || '';
     for (const line of lines) this._onLine(line);
   }
 
-  flush() {
+  flush(): void {
     if (this._buffer) {
       this._onLine(this._buffer);
       this._buffer = '';
@@ -421,7 +533,7 @@ class LineBuffer {
   }
 }
 
-function parseAgentEvent(line) {
+function parseAgentEvent(line: string): any {
   const trimmed = String(line || '').trim();
   if (!trimmed) return null;
   if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) {
@@ -519,7 +631,7 @@ function parseAgentEvent(line) {
       }
 
       if (eventType === 'item.started') {
-        const input = {};
+        const input: Record<string, any> = {};
         if (typeof item.command === 'string') {
           const cmd = item.command.trim().replace(/^\/bin\/(?:zsh|bash|sh)\s+-lc\s+/, '').replace(/^['"]|['"]$/g, '');
           input.command = cmd;
@@ -607,7 +719,7 @@ function parseAgentEvent(line) {
   }
 }
 
-function extensionFromMimeType(mimeType = '') {
+function extensionFromMimeType(mimeType = ''): string {
   const normalized = String(mimeType).toLowerCase();
   if (normalized === 'image/png') return '.png';
   if (normalized === 'image/jpeg' || normalized === 'image/jpg') return '.jpg';
@@ -618,7 +730,7 @@ function extensionFromMimeType(mimeType = '') {
   return '.img';
 }
 
-function sanitizeAttachmentName(name = '') {
+function sanitizeAttachmentName(name = ''): string {
   const safe = String(name)
     .replace(/[^a-zA-Z0-9._-]/g, '-')
     .replace(/-+/g, '-')
@@ -627,16 +739,20 @@ function sanitizeAttachmentName(name = '') {
   return safe || 'clipboard-image';
 }
 
-function materializeImageAttachments(attachments) {
+function materializeImageAttachments(attachments?: Attachment[]): {
+  dirPath: string | null;
+  files: MaterializedAttachment[];
+} {
   if (!Array.isArray(attachments) || attachments.length === 0) {
     return { dirPath: null, files: [] };
   }
 
   const sessionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-cli-attachments-'));
-  const files = [];
+  const files: MaterializedAttachment[] = [];
 
   for (let i = 0; i < attachments.length; i++) {
-    const att = attachments[i] || {};
+    const att = attachments[i];
+    if (!att) continue;
     const base64Data = typeof att.base64Data === 'string' ? att.base64Data.trim() : '';
     if (!base64Data) continue;
 
@@ -665,7 +781,7 @@ function materializeImageAttachments(attachments) {
   return { dirPath: sessionDir, files };
 }
 
-function buildPromptWithImageFiles(prompt, files) {
+function buildPromptWithImageFiles(prompt: string, files: Array<{ filePath: string; mimeType: string }>): string {
   if (!Array.isArray(files) || files.length === 0) return prompt;
 
   const lines = files.map((f, idx) => `${idx + 1}. ${f.filePath} (${f.mimeType})`);
@@ -678,7 +794,7 @@ ${lines.join('\n')}
 Please inspect these image files directly and include them in your answer.`;
 }
 
-function runCliAgent(options = {}) {
+function runCliAgent(options: RunCliAgentOptions = {} as RunCliAgentOptions): Promise<RunCliAgentResult> {
   let finalOptions = { ...options };
   let materialized = null;
 
@@ -698,7 +814,7 @@ function runCliAgent(options = {}) {
   return new Promise((resolve, reject) => {
     const timeoutMs = Number(options.timeoutMs || 0);
     let timedOut = false;
-    let childError = null;
+    let childError: (Error & { code?: string }) | null = null;
 
     const child = spawn(invocation.command, invocation.args, {
       cwd: invocation.cwd,
@@ -706,9 +822,9 @@ function runCliAgent(options = {}) {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
-    const stdoutLines = [];
-    const stderrLines = [];
-    const events = [];
+    const stdoutLines: string[] = [];
+    const stderrLines: string[] = [];
+    const events: any[] = [];
 
     const onEvent = typeof options.onEvent === 'function' ? options.onEvent : null;
     const onStdout = typeof options.onStdout === 'function' ? options.onStdout : null;
@@ -716,7 +832,7 @@ function runCliAgent(options = {}) {
 
     child.stdin && child.stdin.end();
 
-    let timeoutHandle = null;
+    let timeoutHandle: NodeJS.Timeout | null = null;
     if (timeoutMs > 0) {
       timeoutHandle = setTimeout(() => {
         timedOut = true;
@@ -738,7 +854,7 @@ function runCliAgent(options = {}) {
       }
     };
 
-    const handleLine = (line) => {
+    const handleLine = (line: string) => {
       const parsed = parseAgentEvent(line);
       if (parsed) {
         const parsedEvents = Array.isArray(parsed) ? parsed : [parsed];
@@ -748,7 +864,7 @@ function runCliAgent(options = {}) {
               if (isAttemptingUnauthorizedAccess(event.name, event.input, workspacePath)) {
                 child.kill('SIGKILL');
                 timedOut = false;
-                const securityErr = new Error(`[SECURITY VIOLATION] Agent attempted to access unauthorized path outside the workspace: ${JSON.stringify(event.input)}. Process killed.`);
+                const securityErr = new Error(`[SECURITY VIOLATION] Agent attempted to access unauthorized path outside the workspace: ${JSON.stringify(event.input)}. Process killed.`) as Error & { code?: string };
                 securityErr.code = 'SECURITY_VIOLATION';
                 childError = securityErr;
                 return;
@@ -817,7 +933,7 @@ function runCliAgent(options = {}) {
   });
 }
 
-module.exports = {
+export {
   AGENT_DEFINITIONS,
   normalizeAgent,
   resolveCwd,
