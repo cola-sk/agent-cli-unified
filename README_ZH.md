@@ -87,6 +87,8 @@ console.log(result.ok, result.exitCode);
 - `invocation`（解析后的命令、参数、工作区和环境变量）
 - `timedOut` (boolean)
 
+Copilot CLI 的 JSONL 生命周期事件也会被统一：`tool.execution_start` 会转换为 `tool_use`，`tool.execution_complete` 会转换为 `tool_result`，因此上层应用可以用同一套工具时间线渲染 Claude Code、Codex、Gemini 和 Copilot。
+
 参数配置:
 
 - 支持 `buildCliInvocation(options)` 的所有参数

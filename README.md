@@ -88,6 +88,8 @@ Runs the invocation with `spawn` and returns:
 - `invocation` (resolved command/args/cwd/env)
 - `timedOut` (boolean)
 
+Copilot CLI JSONL lifecycle events are normalized too: `tool.execution_start` is emitted as `tool_use`, and `tool.execution_complete` is emitted as `tool_result`, so consumers can render one tool timeline across Claude Code, Codex, Gemini, and Copilot.
+
 Parameters:
 
 - All options from `buildCliInvocation(options)`
