@@ -149,6 +149,31 @@ test('runCliAgent executes a command and emits events', async () => {
   assert.ok(result.events.some((e) => e.type === 'text' && e.text === 'ok'));
 });
 
+test('runCliAgent suppresses duplicate final assistant messages after deltas', async () => {
+  const cmd = process.execPath;
+  const textEvents = [];
+  const result = await runCliAgent({
+    agent: 'claude',
+    prompt: 'ignored',
+    commandPath: cmd,
+    argsOverride: [
+      '-e',
+      [
+        'console.log(JSON.stringify({type:"assistant.message_delta",data:{messageId:"msg_1",deltaContent:"Hel"}}));',
+        'console.log(JSON.stringify({type:"assistant.message_delta",data:{messageId:"msg_1",deltaContent:"lo"}}));',
+        'console.log(JSON.stringify({type:"assistant.message",data:{messageId:"msg_1",content:"Hello"}}));'
+      ].join(' ')
+    ],
+    onEvent: (event) => {
+      if (event.type === 'text') textEvents.push(event.text);
+    }
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(textEvents, ['Hel', 'lo']);
+  assert.equal(result.events.filter((e) => e.type === 'text').map((e) => e.text).join(''), 'Hello');
+});
+
 test('buildCliInvocation supports argsTemplate with placeholders', () => {
   const invocation = buildCliInvocation({
     agent: 'claude',

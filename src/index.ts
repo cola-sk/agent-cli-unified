@@ -668,11 +668,21 @@ function parseAgentEvent(line: string): any {
     }
 
     if (eventType === 'assistant.message_delta') {
-      return { type: 'text', text: json?.data?.deltaContent || '' };
+      return {
+        type: 'text',
+        text: json?.data?.deltaContent || '',
+        messageId: json?.data?.messageId || '',
+        isDelta: true,
+      };
     }
 
     if (eventType === 'assistant.message') {
-      return { type: 'text', text: json?.data?.content || '' };
+      return {
+        type: 'text',
+        text: json?.data?.content || '',
+        messageId: json?.data?.messageId || '',
+        isFinal: true,
+      };
     }
 
     if (eventType === 'tool_use' || eventType === 'tool_call' || eventType === 'functionCall') {
@@ -854,11 +864,19 @@ function runCliAgent(options: RunCliAgentOptions = {} as RunCliAgentOptions): Pr
       }
     };
 
+    const deltaMessageIds = new Set<string>();
+
     const handleLine = (line: string) => {
       const parsed = parseAgentEvent(line);
       if (parsed) {
         const parsedEvents = Array.isArray(parsed) ? parsed : [parsed];
         for (const event of parsedEvents) {
+          if (event.type === 'text' && event.messageId && event.isDelta) {
+            deltaMessageIds.add(event.messageId);
+          }
+          if (event.type === 'text' && event.messageId && event.isFinal && deltaMessageIds.has(event.messageId)) {
+            continue;
+          }
           if (event.type === 'tool_use' && restrictToWorkspace && workspacePath) {
             if (!explicitlyRequestsExternalAccess(finalOptions.prompt || '', workspacePath)) {
               if (isAttemptingUnauthorizedAccess(event.name, event.input, workspacePath)) {
