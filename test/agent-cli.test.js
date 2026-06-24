@@ -18,15 +18,16 @@ const fs = require('fs');
 test('normalizeAgent resolves aliases and defaults', () => {
   assert.equal(normalizeAgent('codex-agent'), 'codex');
   assert.equal(normalizeAgent('claude-code'), 'claude');
-  assert.equal(normalizeAgent('gemini-agent'), 'gemini');
+  assert.equal(normalizeAgent('antigravity-agent'), 'antigravity');
   assert.equal(normalizeAgent('copilot-cli'), 'copilot');
+  assert.equal(normalizeAgent('gemini-agent'), 'claude');
+  assert.equal(normalizeAgent('gemini'), 'claude');
   assert.equal(normalizeAgent('unknown'), 'claude');
 });
 
-test('resolveCwd returns home for empty input', () => {
-  const home = require('os').homedir();
-  assert.equal(resolveCwd(''), home);
-  assert.equal(resolveCwd('   '), home);
+test('resolveCwd returns process.cwd() for empty input', () => {
+  assert.equal(resolveCwd(''), process.cwd());
+  assert.equal(resolveCwd('   '), process.cwd());
   assert.equal(resolveCwd('/tmp/repo'), '/tmp/repo');
 });
 
@@ -92,20 +93,20 @@ test('buildCliInvocation supports model/system prompt and cliOptions toggles', (
   assert.equal(codex.args.includes('--skip-git-repo-check'), false);
   assert.equal(codex.args.includes('-c'), false);
 
-  const gemini = buildCliInvocation({
-    agent: 'gemini',
+  const antigravity = buildCliInvocation({
+    agent: 'antigravity',
     prompt: 'hello',
-    commandPath: '/usr/local/bin/gemini',
+    commandPath: '/usr/local/bin/agy',
   });
-  // default aligns with cortex style: use -p prompt flag
-  assert.ok(gemini.args.includes('-p'));
+  assert.deepEqual(antigravity.args, ['--dangerously-skip-permissions', '--print', 'hello']);
+
 });
 
 test('detectCliAgents supports injected discovery hooks', () => {
   const binaries = {
     claude: '/bin/claude',
     codex: '/bin/codex',
-    gemini: '/bin/gemini',
+    agy: '/bin/agy',
     copilot: '/bin/copilot',
   };
 
@@ -117,6 +118,18 @@ test('detectCliAgents supports injected discovery hooks', () => {
   assert.equal(list.length, 4);
   assert.ok(list.every((x) => x.available));
   assert.ok(list.every((x) => x.version === '1.2.3'));
+  assert.equal(list.find((x) => x.id === 'antigravity').executablePath, '/bin/agy');
+});
+
+test('detectCliAgents does not fall back to Gemini CLI binary names', () => {
+  const list = detectCliAgents({
+    findExecutable: (name) => name === 'gemini' ? '/bin/gemini' : null,
+    getVersion: () => '1.2.3',
+  });
+
+  const antigravity = list.find((x) => x.id === 'antigravity');
+  assert.equal(antigravity.available, false);
+  assert.equal(antigravity.executablePath, null);
 });
 
 test('parseAgentEvent parses text and tool payloads', () => {
@@ -193,18 +206,19 @@ test('buildCliInvocation supports argsTemplate with placeholders', () => {
 
 test('buildCliInvocation supports argsTemplate with missing prompt placeholder fallback', () => {
   const invocation = buildCliInvocation({
-    agent: 'gemini',
+    agent: 'antigravity',
     prompt: 'test prompt',
     systemPrompt: 'System rule',
     model: 'gemini-1.5-pro',
-    commandPath: '/bin/gemini',
+    commandPath: '/bin/antigravity',
     argsTemplate: ['--verbose']
   });
 
   assert.ok(invocation.args.includes('--verbose'));
-  assert.ok(invocation.args.includes('--skip-trust'));
-  assert.ok(invocation.args.includes('-p'));
+  assert.ok(invocation.args.includes('--print'));
+  assert.ok(invocation.args.includes('--dangerously-skip-permissions'));
   assert.ok(invocation.args.includes('System rule\n\ntest prompt'));
+
 });
 
 test('parseAgentEvent handles Claude Code nested assistant event', () => {
@@ -227,7 +241,7 @@ test('parseAgentEvent handles Claude Code nested assistant event', () => {
   assert.deepEqual(parsed[2], { type: 'tool_use', toolUseId: 'use_1', name: 'read_file', input: { path: 'a.txt' } });
 });
 
-test('parseAgentEvent handles Gemini nested, flat message, and result events', () => {
+test('parseAgentEvent handles Antigravity nested, flat message, and result events', () => {
   const nestedLine = JSON.stringify({
     type: 'message',
     role: 'assistant',
@@ -606,7 +620,7 @@ test('parseAgentEvent handles direct tool_use event', () => {
   assert.equal(e.toolUseId, 'tu_1');
 });
 
-test('parseAgentEvent handles direct functionCall event (Gemini style)', () => {
+test('parseAgentEvent handles direct functionCall event (Antigravity style)', () => {
   const e = parseAgentEvent('{"type":"functionCall","name":"search","input":{"q":"test"},"id":"fc_1"}');
   assert.equal(e.type, 'tool_use');
   assert.equal(e.name, 'search');
@@ -628,7 +642,7 @@ test('parseAgentEvent handles direct tool_result with error', () => {
   assert.equal(e.isError, true);
 });
 
-test('parseAgentEvent handles functionResponse event (Gemini style)', () => {
+test('parseAgentEvent handles functionResponse event (Antigravity style)', () => {
   const e = parseAgentEvent('{"type":"functionResponse","functionResponse":{"response":"result data"},"id":"fr_1"}');
   assert.equal(e.type, 'tool_result');
   assert.equal(e.content, 'result data');
@@ -659,8 +673,8 @@ test('parseAgentEvent falls back to json type for JSON without type field', () =
   assert.deepEqual(e.payload, { foo: 'bar', baz: 42 });
 });
 
-// Nested Gemini content block with "content" type (alternative to "text")
-test('parseAgentEvent handles Gemini nested content block with "content" type', () => {
+// Nested Antigravity content block with "content" type (alternative to "text")
+test('parseAgentEvent handles Antigravity nested content block with "content" type', () => {
   const line = JSON.stringify({
     type: 'message',
     role: 'model',
@@ -727,17 +741,15 @@ test('buildCliInvocation appends extraArgs', () => {
   assert.equal(invocation.args[idx1 + 1], '--extra2');
 });
 
-test('buildCliInvocation supports geminiPromptStyle positional', () => {
+test('buildCliInvocation builds current Antigravity print args', () => {
   const invocation = buildCliInvocation({
-    agent: 'gemini',
+    agent: 'antigravity',
     prompt: 'hello world',
-    commandPath: '/bin/gemini',
-    cliOptions: { geminiPromptStyle: 'positional' },
+    commandPath: '/bin/antigravity',
+    cliOptions: { bypassConfirmations: false },
   });
-  // Should NOT use -p flag; prompt should appear as positional arg
-  const pIndex = invocation.args.indexOf('-p');
-  assert.equal(pIndex, -1, 'Should not use -p flag in positional mode');
-  assert.ok(invocation.args.includes('hello world'), 'Prompt should be a positional argument');
+  assert.deepEqual(invocation.args, ['--print', 'hello world']);
+
 });
 
 test('buildCliInvocation supports copilot custom output format and stream mode', () => {

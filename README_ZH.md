@@ -3,7 +3,7 @@
 一个可复用的 Node.js 模块，为以下本地 CLI 代理提供标准化的命令构建、执行和流式事件解析能力：
 - Codex CLI
 - Claude Code CLI
-- Gemini CLI
+- Antigravity CLI
 - Copilot CLI
 
 ## 安装
@@ -32,7 +32,7 @@ console.log(invocation.command, invocation.args.join(' '));
 
 // 3. 运行本地 Agent，监听实时流式事件并开启安全沙箱
 const result = await runCliAgent({
-  agent: 'gemini',
+  agent: 'antigravity',
   prompt: 'summarize repository status',
   cwd: '/path/to/repo',
   sandbox: {
@@ -56,7 +56,7 @@ console.log(result.ok, result.exitCode);
 
 构建确定性的 CLI 命令调用配置。
 
-- `agent`: `codex | claude | gemini | copilot`（支持别名映射）
+- `agent`: `codex | claude | antigravity | copilot`
 - `prompt`: 必填字符串
 - `cwd`: 可选，工作目录；默认使用用户 Home 目录
 - `systemPrompt`: 可选，系统提示词；若 CLI 支持则直接注入对应参数，否则拼装进 Prompt 中
@@ -73,7 +73,6 @@ console.log(result.ok, result.exitCode);
   - `disableUpdateCheck` (默认 `true`, codex)
   - `skipGitRepoCheck` (默认 `true`, codex)
   - `includeHookEvents` (默认 `true`, claude)
-  - `geminiPromptStyle` (`flag` 默认使用 -p，或 `positional` 位置参数)
 
 返回对象: `{ agent, label, binary, command, args, cwd, env, prompt }`
 
@@ -87,7 +86,7 @@ console.log(result.ok, result.exitCode);
 - `invocation`（解析后的命令、参数、工作区和环境变量）
 - `timedOut` (boolean)
 
-Copilot CLI 的 JSONL 生命周期事件也会被统一：`tool.execution_start` 会转换为 `tool_use`，`tool.execution_complete` 会转换为 `tool_result`，因此上层应用可以用同一套工具时间线渲染 Claude Code、Codex、Gemini 和 Copilot。
+Copilot CLI 的 JSONL 生命周期事件也会被统一：`tool.execution_start` 会转换为 `tool_use`，`tool.execution_complete` 会转换为 `tool_result`，因此上层应用可以用同一套工具时间线渲染 Claude Code、Codex、Antigravity 和 Copilot。
 
 参数配置:
 

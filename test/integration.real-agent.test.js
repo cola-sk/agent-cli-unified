@@ -10,7 +10,7 @@ const {
 } = require('../dist/index');
 
 const RUN_REAL = process.env.RUN_REAL_AGENT_E2E === '1';
-const REQUESTED_AGENTS = (process.env.REAL_AGENT_LIST || 'codex,claude,gemini,copilot')
+const REQUESTED_AGENTS = (process.env.REAL_AGENT_LIST || 'codex,claude,antigravity,copilot')
   .split(',')
   .map((x) => x.trim().toLowerCase())
   .filter(Boolean);

@@ -5,7 +5,7 @@
 A reusable Node.js package that standardizes command construction, execution, and stream event parsing for:
 - Codex CLI
 - Claude Code CLI
-- Gemini CLI
+- Antigravity CLI
 - Copilot CLI
 
 ## Install
@@ -33,7 +33,7 @@ console.log(invocation.command, invocation.args.join(' '));
 
 // 2. Running an Agent with Real-time Event Stream & Security Sandbox
 const result = await runCliAgent({
-  agent: 'gemini',
+  agent: 'antigravity',
   prompt: 'summarize repository status',
   cwd: '/path/to/repo',
   sandbox: {
@@ -57,7 +57,7 @@ console.log(result.ok, result.exitCode);
 
 Build a deterministic command invocation.
 
-- `agent`: `codex | claude | gemini | copilot` (aliases supported)
+- `agent`: `codex | claude | antigravity | copilot`
 - `prompt`: required string
 - `cwd`: optional; defaults to user home
 - `systemPrompt`: optional; injected when CLI supports it, otherwise folded into prompt
@@ -74,7 +74,6 @@ Build a deterministic command invocation.
   - `disableUpdateCheck` (default `true`, codex)
   - `skipGitRepoCheck` (default `true`, codex)
   - `includeHookEvents` (default `true`, claude)
-  - `geminiPromptStyle` (`flag` default, or `positional`)
 
 Returns: `{ agent, label, binary, command, args, cwd, env, prompt }`
 
@@ -88,7 +87,7 @@ Runs the invocation with `spawn` and returns:
 - `invocation` (resolved command/args/cwd/env)
 - `timedOut` (boolean)
 
-Copilot CLI JSONL lifecycle events are normalized too: `tool.execution_start` is emitted as `tool_use`, and `tool.execution_complete` is emitted as `tool_result`, so consumers can render one tool timeline across Claude Code, Codex, Gemini, and Copilot.
+Copilot CLI JSONL lifecycle events are normalized too: `tool.execution_start` is emitted as `tool_use`, and `tool.execution_complete` is emitted as `tool_result`, so consumers can render one tool timeline across Claude Code, Codex, Antigravity, and Copilot.
 
 Parameters:
 

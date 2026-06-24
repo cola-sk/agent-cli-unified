@@ -7,6 +7,7 @@ export interface AgentDefinition {
   id: string;
   aliases: string[];
   binary: string;
+  binaries?: string[];
   label: string;
   subLabel: string;
   type: string;
@@ -31,9 +32,7 @@ export interface CliOptions {
   includeHookEvents?: boolean;
   verbose?: boolean;
   print?: boolean;
-  geminiPromptStyle?: 'flag' | 'positional';
   claudeOutputFormat?: string;
-  geminiOutputFormat?: string;
   copilotOutputFormat?: string;
   copilotStreamMode?: string;
   skipTrust?: boolean;
@@ -124,11 +123,12 @@ const AGENT_DEFINITIONS: Record<string, AgentDefinition> = Object.freeze({
     type: 'local',
     versionFlag: '-c check_for_update_on_startup=false --version',
   },
-  gemini: {
-    id: 'gemini',
-    aliases: ['gemini-agent'],
-    binary: 'gemini',
-    label: 'Gemini CLI',
+  antigravity: {
+    id: 'antigravity',
+    aliases: ['antigravity-agent'],
+    binary: 'agy',
+    binaries: ['agy', 'antigravity'],
+    label: 'Antigravity CLI',
     subLabel: 'Google CLI Agent',
     type: 'local',
     versionFlag: '--version',
@@ -166,7 +166,7 @@ function resolveCwd(cwd?: string): string {
     }
     return path.resolve(trimmed);
   }
-  return os.homedir();
+  return process.cwd();
 }
 
 function buildCliPath(): string {
@@ -233,6 +233,7 @@ function defaultEnv(extra: Record<string, string | undefined> = {}): Record<stri
     LINES: '10000',
     NODE_TLS_REJECT_UNAUTHORIZED: '0',
     GEMINI_CLI_TRUST_WORKSPACE: 'true',
+    ANTIGRAVITY_CLI_TRUST_WORKSPACE: 'true',
     DISABLE_AUTOUPDATER: '1',
     ...extra,
   };
@@ -260,7 +261,6 @@ function buildAgentArgs(agentId: string, payload: {
     includeHookEvents: cliOptions.includeHookEvents !== false,
     verbose: cliOptions.verbose !== false,
     print: cliOptions.print !== false,
-    geminiPromptStyle: cliOptions.geminiPromptStyle || 'flag',
     ...cliOptions,
   };
 
@@ -288,14 +288,12 @@ function buildAgentArgs(agentId: string, payload: {
     return args;
   }
 
-  if (agentId === 'gemini') {
+  if (agentId === 'antigravity') {
     const effectivePrompt = systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt;
-    const args = ['--output-format', opts.geminiOutputFormat || 'stream-json'];
-    if (opts.bypassConfirmations) args.push('--yolo');
-    if (opts.skipTrust !== false) args.push('--skip-trust');
+    const args: string[] = [];
+    if (opts.bypassConfirmations) args.push('--dangerously-skip-permissions');
     if (model) args.push('--model', model);
-    if (opts.geminiPromptStyle === 'positional') args.push(effectivePrompt);
-    else args.push('-p', effectivePrompt);
+    args.push('--print', effectivePrompt);
     return args;
   }
 
@@ -322,7 +320,9 @@ function detectCliAgents(options: {
   const version = options.getVersion || getExecutableVersion;
 
   return Object.values(AGENT_DEFINITIONS).map((agent) => {
-    const executablePath = find(agent.binary);
+    const executablePath = (agent.binaries || [agent.binary])
+      .map((binary) => find(binary))
+      .find(Boolean) || null;
     if (!executablePath) {
       return {
         id: agent.id,
@@ -436,9 +436,10 @@ function buildCliInvocation(options: BuildCliInvocationOptions = {} as BuildCliI
     }
   }
 
+  const find = options.findExecutable || findExecutable;
   const commandPath =
     (typeof options.commandPath === 'string' && options.commandPath.trim()) ||
-    (options.findExecutable || findExecutable)(agent.binary);
+    (agent.binaries || [agent.binary]).map((binary) => find(binary)).find(Boolean);
 
   if (!commandPath) {
     throw new Error(`Executable not found for ${agent.label} (${agent.binary})`);
@@ -466,9 +467,10 @@ function buildCliInvocation(options: BuildCliInvocationOptions = {} as BuildCliI
         if (options.model) args.push('--model', options.model);
         args.push('-p', prompt, '--output-format', 'stream-json', '--verbose', '--dangerously-skip-permissions');
         if (systemPrompt) args.push('--system-prompt', systemPrompt);
-      } else if (agentId === 'gemini') {
+      } else if (agentId === 'antigravity') {
+        if (options.cliOptions?.bypassConfirmations !== false) args.push('--dangerously-skip-permissions');
         if (options.model) args.push('--model', options.model);
-        args.push('--skip-trust', '-p', effectivePrompt, '--output-format', 'stream-json', '--yolo');
+        args.push('--print', effectivePrompt);
       } else if (agentId === 'copilot') {
         if (options.model) args.push('--model', options.model);
         args.push('-p', effectivePrompt, '--yolo');
@@ -564,7 +566,7 @@ function parseAgentEvent(line: string): any {
       return out.length > 0 ? out : null;
     }
 
-    // 1b. Nested Gemini/standard message content events (unpacks tool calls and text)
+    // 1b. Nested Antigravity/standard message content events (unpacks tool calls and text)
     if (eventType === 'message' && (json.role === 'assistant' || json.role === 'model') && Array.isArray(json.content)) {
       const out = [];
       for (const block of json.content) {
@@ -584,7 +586,7 @@ function parseAgentEvent(line: string): any {
       return out.length > 0 ? out : null;
     }
 
-    // 1c. Flat Gemini/standard message content events
+    // 1c. Flat Antigravity/standard message content events
     if (eventType === 'message' && (json.role === 'assistant' || json.role === 'model') && typeof json.content === 'string') {
       return { type: 'text', text: json.content };
     }
@@ -662,7 +664,7 @@ function parseAgentEvent(line: string): any {
       }
     }
 
-    // 3. Gemini / standard stream JSON events
+    // 3. Gemini / Antigravity / standard stream JSON events
     if (eventType === 'content' || eventType === 'text') {
       return { type: 'text', text: json.text || json.value || json.content || '' };
     }
